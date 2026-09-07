@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS papers (
     review              TEXT,
     what_new_i_learned  TEXT,
     notes               TEXT,
+    completion_type     TEXT    NOT NULL DEFAULT 'percentage',
+    completion_value    REAL    NOT NULL DEFAULT 0,
+    completion_total    INTEGER,
+    reading_start_date  TEXT,
     created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (research_group_id) REFERENCES research_groups(id) ON DELETE CASCADE

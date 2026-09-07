@@ -58,6 +58,71 @@
         document.getElementById("modal-overlay").classList.remove("active");
     }
 
+    // ── Completion helpers ────────────────────────────────────────────
+    function completionPct(p) {
+        if (p.completion_type === "pages") {
+            if (!p.completion_total || p.completion_total <= 0) return 0;
+            return Math.min(100, Math.round((p.completion_value / p.completion_total) * 100));
+        }
+        return Math.min(100, Math.round(p.completion_value || 0));
+    }
+    function completionLabel(p) {
+        if (p.completion_type === "pages") {
+            return `${Math.round(p.completion_value || 0)}/${p.completion_total || "?"}`;
+        }
+        return `${Math.round(p.completion_value || 0)}%`;
+    }
+    function completionBar(p) {
+        const pct = completionPct(p);
+        const cls = pct >= 80 ? "pbar-high" : pct >= 40 ? "pbar-mid" : "pbar-low";
+        return `<div class="progress-track">
+            <div class="progress-fill ${cls}" style="width:${pct}%"></div>
+            <div class="progress-text">${completionLabel(p)}</div>
+        </div>`;
+    }
+
+    // ── View Paper (read-only) ────────────────────────────────────────
+    function openPaperView(p) {
+        const detail = (label, value) => value && value !== "—"
+            ? `<div class="view-detail"><div class="view-detail-label">${label}</div><div class="view-detail-value">${esc(value)}</div></div>`
+            : "";
+        openModal(`📄 ${p.paper_name}`, `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+                ${detail("Professor", p.professor)}
+                ${detail("Lab / Group", p.lab_group)}
+                ${detail("Year", p.year)}
+                ${detail("Venue", p.venue)}
+                ${detail("Topic", p.topic)}
+                ${detail("Areas Covered", p.areas_covered)}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+                <div class="view-detail">
+                    <div class="view-detail-label">Rating</div>
+                    <div class="view-detail-value">${p.rating != null ? `${p.rating}/10` : "—"}</div>
+                </div>
+                <div class="view-detail">
+                    <div class="view-detail-label">Completion</div>
+                    <div class="view-detail-value">${completionBar(p)}</div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+                ${detail("Link", p.link)}
+                ${detail("Reading Start Date", p.reading_start_date)}
+            </div>
+            ${detail("Review", p.review)}
+            ${detail("What New I Learned", p.what_new_i_learned)}
+            ${detail("Notes", p.notes)}
+            <div class="form-actions">
+                <button class="btn btn-outline" onclick="document.getElementById('modal-overlay').classList.remove('active')">Close</button>
+                <button class="btn btn-primary" id="view-to-edit">Edit</button>
+            </div>
+        `);
+        document.getElementById("view-to-edit").addEventListener("click", () => {
+            closeModal();
+            openPaperForm(p.id);
+        });
+    }
+
     // ── Navigation ────────────────────────────────────────────────────
     function navigate(page) {
         currentPage = page;
@@ -224,19 +289,25 @@
                             <tr>
                                 <th>Paper Name</th>
                                 <th>Link</th>
-                                <th>Year</th>
-                                <th>Venue</th>
-                                <th>Topic</th>
-                                <th>Areas Covered</th>
                                 <th>Rating</th>
-                                <th>Review</th>
-                                <th>What New I Learned</th>
-                                <th>Notes</th>
+                                <th style="min-width:130px">Completion</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${papers.map(p => renderPaperRow(p)).join("")}
+                            ${papers.map(p => `<tr>
+                                <td class="paper-name-wrap"><strong>${esc(p.paper_name)}</strong></td>
+                                <td class="cell-link">${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Link ↗</a>` : "—"}</td>
+                                <td>${p.rating != null ? `<span class="rating-badge ${ratingClass(p.rating)}">${p.rating}/10</span>` : "—"}</td>
+                                <td>${completionBar(p)}</td>
+                                <td class="actions">
+                                    <div class="btn-group">
+                                        <button class="btn btn-ghost btn-xs" data-view-paper="${p.id}" title="View">👁️</button>
+                                        <button class="btn btn-ghost btn-xs" data-edit-paper="${p.id}" title="Edit">✏️</button>
+                                        <button class="btn btn-ghost btn-xs" data-delete-paper="${p.id}" title="Delete">🗑️</button>
+                                    </div>
+                                </td>
+                            </tr>`).join("")}
                         </tbody>
                     </table>
                 </div>
@@ -250,34 +321,19 @@
             </div>`}
         `;
 
-        // Wire up edit/delete buttons
+        // Wire up view/edit/delete buttons
+        container.querySelectorAll("[data-view-paper]").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                const paper = await api(`/api/papers/${btn.dataset.viewPaper}`);
+                openPaperView(paper);
+            });
+        });
         container.querySelectorAll("[data-edit-paper]").forEach(btn => {
             btn.addEventListener("click", () => openPaperForm(parseInt(btn.dataset.editPaper)));
         });
         container.querySelectorAll("[data-delete-paper]").forEach(btn => {
             btn.addEventListener("click", () => confirmDeletePaper(parseInt(btn.dataset.deletePaper)));
         });
-    }
-
-    function renderPaperRow(p) {
-        return `<tr>
-            <td><strong>${esc(p.paper_name)}</strong></td>
-            <td class="cell-link">${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Link ↗</a>` : "—"}</td>
-            <td>${p.year || "—"}</td>
-            <td>${esc(p.venue) || "—"}</td>
-            <td>${esc(p.topic) || "—"}</td>
-            <td class="cell-long"><div class="cell-long-text">${esc(p.areas_covered) || "—"}</div></td>
-            <td>${p.rating != null ? `<span class="rating-badge ${ratingClass(p.rating)}">${p.rating}/10</span>` : "—"}</td>
-            <td class="cell-long"><div class="cell-long-text">${esc(p.review) || "—"}</div></td>
-            <td class="cell-long"><div class="cell-long-text">${esc(p.what_new_i_learned) || "—"}</div></td>
-            <td class="cell-long"><div class="cell-long-text">${esc(p.notes) || "—"}</div></td>
-            <td class="actions">
-                <div class="btn-group">
-                    <button class="btn btn-ghost btn-xs" data-edit-paper="${p.id}" title="Edit">✏️</button>
-                    <button class="btn btn-ghost btn-xs" data-delete-paper="${p.id}" title="Delete">🗑️</button>
-                </div>
-            </td>
-        </tr>`;
     }
 
     // ── Paper Form Modal ──────────────────────────────────────────────
@@ -295,7 +351,11 @@
             return `<option value="${g.id}" ${sel}>${g.rank}. ${esc(g.professor)} | ${esc(g.lab_group)}</option>`;
         }).join("");
 
-
+        const compType = paper?.completion_type || "percentage";
+        const compValue = paper?.completion_value ?? 0;
+        const compTotal = paper?.completion_total ?? "";
+        const todayStr = new Date().toISOString().split("T")[0];
+        const rsd = paper?.reading_start_date || (isEdit ? "" : todayStr);
 
         openModal(title, `
             <form id="paper-form">
@@ -338,6 +398,37 @@
                     </div>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Completion</label>
+                    <div class="toggle-group" id="comp-toggle" style="margin-bottom:8px;">
+                        <button type="button" class="toggle-btn ${compType === "percentage" ? "active" : ""}" data-type="percentage">Percentage</button>
+                        <button type="button" class="toggle-btn ${compType === "pages" ? "active" : ""}" data-type="pages">Pages</button>
+                    </div>
+                    <input type="hidden" name="completion_type" id="comp-type-input" value="${compType}">
+                    <div id="comp-fields">
+                        ${compType === "percentage" ? `
+                            <input class="form-input" name="completion_value" type="number" min="0" max="100" step="1" value="${compValue}" placeholder="0–100%">
+                        ` : `
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:0.8rem">Pages Read</label>
+                                    <input class="form-input" name="completion_value" type="number" min="0" step="1" value="${compValue}">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:0.8rem">Total Pages</label>
+                                    <input class="form-input" name="completion_total" type="number" min="1" step="1" value="${compTotal}">
+                                </div>
+                            </div>
+                        `}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Reading Start Date</label>
+                    <div class="form-row" style="align-items:center;gap:8px;">
+                        <input class="form-input" name="reading_start_date" type="date" id="rsd-input" value="${rsd}">
+                        <button type="button" class="btn btn-outline btn-sm" id="rsd-clear" title="Clear date">✕</button>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Review</label>
                     <textarea class="form-textarea" name="review">${esc(paper?.review || "")}</textarea>
                 </div>
@@ -356,6 +447,37 @@
             </form>
         `);
 
+        // Completion type toggle logic
+        let rsdCleared = false;
+        document.getElementById("rsd-clear").addEventListener("click", () => {
+            document.getElementById("rsd-input").value = "";
+            rsdCleared = true;
+        });
+
+        document.querySelectorAll("#comp-toggle .toggle-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const type = btn.dataset.type;
+                document.getElementById("comp-type-input").value = type;
+                document.querySelectorAll("#comp-toggle .toggle-btn").forEach(b => b.classList.toggle("active", b.dataset.type === type));
+                const fieldsDiv = document.getElementById("comp-fields");
+                if (type === "percentage") {
+                    fieldsDiv.innerHTML = `<input class="form-input" name="completion_value" type="number" min="0" max="100" step="1" value="0" placeholder="0–100%">`;
+                } else {
+                    fieldsDiv.innerHTML = `
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" style="font-size:0.8rem">Pages Read</label>
+                                <input class="form-input" name="completion_value" type="number" min="0" step="1" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" style="font-size:0.8rem">Total Pages</label>
+                                <input class="form-input" name="completion_total" type="number" min="1" step="1" value="">
+                            </div>
+                        </div>`;
+                }
+            });
+        });
+
         document.getElementById("paper-form").addEventListener("submit", async (e) => {
             e.preventDefault();
             const fd = new FormData(e.target);
@@ -364,6 +486,13 @@
             if (body.rating !== "") body.rating = parseFloat(body.rating);
             else body.rating = null;
             body.research_group_id = parseInt(body.research_group_id);
+            body.completion_value = parseFloat(body.completion_value || 0);
+            if (body.completion_total) body.completion_total = parseInt(body.completion_total);
+            else body.completion_total = null;
+            // Handle reading start date
+            if (rsdCleared && !body.reading_start_date) {
+                body.reading_start_date = "__none__";
+            }
             try {
                 if (isEdit) {
                     await api(`/api/papers/${paperId}`, { method: "PUT", body });
@@ -375,7 +504,6 @@
                 closeModal();
                 await loadGroups();
                 if (currentPage === "tracker") {
-                    // Re-render the selector with updated counts
                     const sel = document.getElementById("group-select");
                     if (sel) {
                         sel.innerHTML = '<option value="">— Select —</option>' +
@@ -473,7 +601,7 @@
                                 <td>${esc(g.lab_group)}</td>
                                 <td class="cell-long"><div class="cell-long-text">${esc(g.primary_research_area) || "—"}</div></td>
                                 <td>${g.overall_score != null ? g.overall_score : "—"}</td>
-                                <td><span class="paper-count-badge">${pluralize(g.paper_count, "paper")}</span></td>
+                                <td><span class="paper-count-badge" data-goto-tracker="${g.id}" style="cursor:pointer" title="View papers in tracker">${pluralize(g.paper_count, "paper")}</span></td>
                                 <td class="actions">
                                     <div class="btn-group">
                                         <button class="btn btn-ghost btn-xs" data-edit-group="${g.id}" title="Edit">✏️</button>
@@ -492,6 +620,12 @@
         el.querySelectorAll("[data-delete-group]").forEach(b => b.addEventListener("click", () => confirmDeleteGroup(parseInt(b.dataset.deleteGroup), parseInt(b.dataset.paperCount))));
         el.querySelectorAll("[data-move-up]").forEach(b => b.addEventListener("click", () => moveGroup(parseInt(b.dataset.moveUp), "up")));
         el.querySelectorAll("[data-move-down]").forEach(b => b.addEventListener("click", () => moveGroup(parseInt(b.dataset.moveDown), "down")));
+        el.querySelectorAll("[data-goto-tracker]").forEach(b => {
+            b.addEventListener("click", () => {
+                selectedGroupId = parseInt(b.dataset.gotoTracker);
+                navigate("tracker");
+            });
+        });
     }
 
     async function moveGroup(gid, direction) {
@@ -611,6 +745,8 @@
     // ════════════════════════════════════════════════════════════════════
     async function renderAllPapers(el) {
         const [filterOpts] = await Promise.all([api("/api/filter-options")]);
+        const ratingRanges = Array.from({length: 10}, (_, i) => ({min: i, max: i+1, label: `${i}–${i+1}`}));
+
         el.innerHTML = `
             <div class="page-header">
                 <div class="page-header-row">
@@ -624,7 +760,7 @@
                     </button>
                 </div>
             </div>
-            <div class="search-bar">
+            <div class="search-bar" style="flex-wrap:wrap;">
                 <input class="form-input" id="papers-search" placeholder="Search papers…">
                 <select class="form-select" id="filter-professor">
                     <option value="">All Professors</option>
@@ -640,13 +776,26 @@
                 </select>
                 <select class="form-select" id="filter-rating">
                     <option value="">All Ratings</option>
-                    ${Array.from({length: 11}, (_, i) => 10-i).map(r => `<option value="${r}">${r}/10</option>`).join("")}
+                    ${ratingRanges.map(r => `<option value="${r.min}-${r.max}">${r.label}</option>`).join("")}
                 </select>
+                <div class="filter-chips">
+                    <span class="text-muted" style="font-size:0.82rem;">Status:</span>
+                    <span class="filter-chip" id="chip-completed" data-status="completed">Completed</span>
+                    <span class="filter-chip" id="chip-pending" data-status="pending">Pending</span>
+                </div>
             </div>
             <div id="all-papers-content"></div>
         `;
 
         document.getElementById("btn-add-paper-all").addEventListener("click", () => openPaperForm());
+
+        // Completion filter chips toggle
+        document.querySelectorAll(".filter-chip").forEach(chip => {
+            chip.addEventListener("click", () => {
+                chip.classList.toggle("active");
+                loadPapers();
+            });
+        });
 
         async function loadPapers() {
             const params = new URLSearchParams();
@@ -654,12 +803,21 @@
             const prof = document.getElementById("filter-professor").value;
             const lab = document.getElementById("filter-lab").value;
             const year = document.getElementById("filter-year").value;
-            const rating = document.getElementById("filter-rating").value;
+            const ratingVal = document.getElementById("filter-rating").value;
             if (q) params.set("q", q);
             if (prof) params.set("group_id", prof);
             if (lab) params.set("lab", lab);
             if (year) params.set("year", year);
-            if (rating) params.set("rating", rating);
+            if (ratingVal) {
+                const [rMin, rMax] = ratingVal.split("-");
+                params.set("rating_min", rMin);
+                params.set("rating_max", rMax);
+            }
+            // Completion filter
+            const statuses = [];
+            if (document.getElementById("chip-completed").classList.contains("active")) statuses.push("completed");
+            if (document.getElementById("chip-pending").classList.contains("active")) statuses.push("pending");
+            if (statuses.length) params.set("completion", statuses.join(","));
 
             const papers = await api(`/api/papers?${params}`);
             const container = document.getElementById("all-papers-content");
@@ -677,26 +835,21 @@
                                 <tr>
                                     <th>Paper Name</th>
                                     <th>Professor</th>
-                                    <th>Lab</th>
-                                    <th>Year</th>
-                                    <th>Venue</th>
-                                    <th>Topic</th>
                                     <th>Rating</th>
+                                    <th style="min-width:130px">Completion</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${papers.map(p => `
                                 <tr>
-                                    <td><strong>${esc(p.paper_name)}</strong></td>
+                                    <td class="paper-name-wrap"><strong>${esc(p.paper_name)}</strong></td>
                                     <td>${esc(p.professor)}</td>
-                                    <td>${esc(p.lab_group)}</td>
-                                    <td>${p.year || "—"}</td>
-                                    <td>${esc(p.venue) || "—"}</td>
-                                    <td>${esc(p.topic) || "—"}</td>
                                     <td>${p.rating != null ? `<span class="rating-badge ${ratingClass(p.rating)}">${p.rating}/10</span>` : "—"}</td>
+                                    <td>${completionBar(p)}</td>
                                     <td class="actions">
                                         <div class="btn-group">
+                                            <button class="btn btn-ghost btn-xs" data-view-paper="${p.id}">👁️</button>
                                             <button class="btn btn-ghost btn-xs" data-edit-paper="${p.id}">✏️</button>
                                             <button class="btn btn-ghost btn-xs" data-delete-paper="${p.id}">🗑️</button>
                                         </div>
@@ -707,6 +860,12 @@
                     </div>
                 </div>
             `;
+            container.querySelectorAll("[data-view-paper]").forEach(b => {
+                b.addEventListener("click", async () => {
+                    const paper = await api(`/api/papers/${b.dataset.viewPaper}`);
+                    openPaperView(paper);
+                });
+            });
             container.querySelectorAll("[data-edit-paper]").forEach(b => b.addEventListener("click", () => openPaperForm(parseInt(b.dataset.editPaper))));
             container.querySelectorAll("[data-delete-paper]").forEach(b => b.addEventListener("click", () => confirmDeletePaper(parseInt(b.dataset.deletePaper))));
         }
@@ -807,7 +966,7 @@
                         <textarea class="form-textarea" name="comments">${esc(field?.comments || "")}</textarea>
                     </div>
                     <div class="form-actions">
-                        <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
                         <button type="submit" class="btn btn-primary">${isEdit ? "Save Changes" : "Save Field"}</button>
                     </div>
                 </form>
@@ -933,7 +1092,7 @@
                         <textarea class="form-textarea" name="key_tradeoff">${esc(lab?.key_tradeoff || "")}</textarea>
                     </div>
                     <div class="form-actions">
-                        <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
                         <button type="submit" class="btn btn-primary">${isEdit ? "Save Changes" : "Save Lab"}</button>
                     </div>
                 </form>
@@ -1024,7 +1183,7 @@
                         <textarea class="form-textarea" name="details" style="min-height: 100px;">${esc(principle?.details || "")}</textarea>
                     </div>
                     <div class="form-actions">
-                        <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
                         <button type="submit" class="btn btn-primary">${isEdit ? "Save Changes" : "Save Principle"}</button>
                     </div>
                 </form>
@@ -1116,7 +1275,7 @@
                         <textarea class="form-textarea" name="content" style="min-height: 150px;">${esc(note?.content || "")}</textarea>
                     </div>
                     <div class="form-actions">
-                        <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
                         <button type="submit" class="btn btn-primary">${isEdit ? "Save Changes" : "Save Note"}</button>
                     </div>
                 </form>

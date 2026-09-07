@@ -213,9 +213,11 @@ def list_papers():
     group_id = request.args.get("group_id")
     year = request.args.get("year")
     venue = request.args.get("venue")
-    rating = request.args.get("rating")
+    rating_min = request.args.get("rating_min")
+    rating_max = request.args.get("rating_max")
     professor = request.args.get("professor")
     lab = request.args.get("lab")
+    completion = request.args.get("completion", "")  # "completed", "pending", "completed,pending"
 
     sql = """
         SELECT p.*, g.professor, g.college, g.lab_group, g.rank
@@ -234,15 +236,32 @@ def list_papers():
     if venue:
         sql += " AND p.venue LIKE ?"
         params.append(f"%{venue}%")
-    if rating:
-        sql += " AND p.rating = ?"
-        params.append(float(rating))
+    if rating_min is not None and rating_min != "":
+        sql += " AND p.rating >= ?"
+        params.append(float(rating_min))
+    if rating_max is not None and rating_max != "":
+        sql += " AND p.rating < ?"
+        params.append(float(rating_max))
     if professor:
         sql += " AND g.professor LIKE ?"
         params.append(f"%{professor}%")
     if lab:
         sql += " AND g.lab_group LIKE ?"
         params.append(f"%{lab}%")
+    if completion:
+        parts = [c.strip() for c in completion.split(",") if c.strip()]
+        if len(parts) == 1:
+            if parts[0] == "completed":
+                sql += """ AND (
+                    (p.completion_type = 'percentage' AND p.completion_value >= 100)
+                    OR (p.completion_type = 'pages' AND p.completion_total > 0 AND p.completion_value >= p.completion_total)
+                )"""
+            elif parts[0] == "pending":
+                sql += """ AND (
+                    (p.completion_type = 'percentage' AND p.completion_value < 100)
+                    OR (p.completion_type = 'pages' AND (p.completion_total IS NULL OR p.completion_total = 0 OR p.completion_value < p.completion_total))
+                )"""
+        # both selected = show all, no filter needed
     if q:
         sql += """ AND (p.paper_name LIKE ? OR p.topic LIKE ? OR p.areas_covered LIKE ?
                    OR p.venue LIKE ? OR g.professor LIKE ? OR g.lab_group LIKE ?)"""
@@ -285,12 +304,26 @@ def create_paper():
         return jsonify({"errors": ["Research group not found"]}), 400
 
     now = datetime.now(timezone.utc).isoformat()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Completion fields
+    comp_type = data.get("completion_type", "percentage")
+    comp_value = float(data.get("completion_value", 0) or 0)
+    comp_total = int(data["completion_total"]) if data.get("completion_total") else None
+    # Reading start date: default to today unless explicitly set to null
+    rsd = data.get("reading_start_date")
+    if rsd is None or rsd == "":
+        reading_start = today
+    elif rsd == "__none__":
+        reading_start = None
+    else:
+        reading_start = rsd
     cur = conn.execute(
         """INSERT INTO papers
            (research_group_id, paper_name, link, year, venue, topic,
             areas_covered, rating, review, what_new_i_learned, notes,
+            completion_type, completion_value, completion_total, reading_start_date,
             created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             int(data["research_group_id"]),
             data["paper_name"].strip(),
@@ -303,6 +336,7 @@ def create_paper():
             data.get("review", "").strip(),
             data.get("what_new_i_learned", "").strip(),
             data.get("notes", "").strip(),
+            comp_type, comp_value, comp_total, reading_start,
             now, now,
         ),
     )
@@ -347,11 +381,24 @@ def update_paper(pid):
         return jsonify({"error": "Paper not found"}), 404
 
     now = datetime.now(timezone.utc).isoformat()
+    # Completion fields
+    comp_type = data.get("completion_type", existing["completion_type"])
+    comp_value = float(data.get("completion_value", existing["completion_value"]) or 0)
+    comp_total = int(data["completion_total"]) if data.get("completion_total") else existing["completion_total"]
+    rsd = data.get("reading_start_date")
+    if rsd == "__none__":
+        reading_start = None
+    elif rsd is not None and rsd != "":
+        reading_start = rsd
+    else:
+        reading_start = existing["reading_start_date"]
     conn.execute(
         """UPDATE papers SET
            research_group_id = ?, paper_name = ?, link = ?, year = ?,
            venue = ?, topic = ?, areas_covered = ?, rating = ?,
-           review = ?, what_new_i_learned = ?, notes = ?, updated_at = ?
+           review = ?, what_new_i_learned = ?, notes = ?,
+           completion_type = ?, completion_value = ?, completion_total = ?,
+           reading_start_date = ?, updated_at = ?
            WHERE id = ?""",
         (
             int(data.get("research_group_id", existing["research_group_id"])),
@@ -365,6 +412,7 @@ def update_paper(pid):
             data.get("review", existing["review"] or "").strip(),
             data.get("what_new_i_learned", existing["what_new_i_learned"] or "").strip(),
             data.get("notes", existing["notes"] or "").strip(),
+            comp_type, comp_value, comp_total, reading_start,
             now, pid,
         ),
     )

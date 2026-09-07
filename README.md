@@ -112,15 +112,6 @@ research-tracker/
 ├── static/
 │   ├── css/style.css       # All styles
 │   └── js/app.js           # Frontend SPA logic
-├── templates/
-│   └── index.html          # HTML shell
-└── tests/
-    └── test_api.py         # Automated test suite
-```
-
-## Running Tests
-
-```bash
-source .venv/bin/activate
-python -m pytest tests/test_api.py -v
+└── templates/
+    └── index.html          # HTML shell 
 ```
